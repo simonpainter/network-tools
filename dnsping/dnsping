@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+#
+# dnsping.sh - DNS query "ping" using dig
+#
+# Sends repeated DNS queries to a resolver, reporting the response status
+# (NOERROR, NXDOMAIN, SERVFAIL, etc.) and round-trip time for each.
+# Prints summary statistics on exit (Ctrl+C or after -c COUNT queries).
+#
+# Examples:
+#   ./dnsping.sh example.com
+#   ./dnsping.sh -s 1.1.1.1 -c 5 cloudflare.com
+#   ./dnsping.sh -t MX -d google.com           # show first answer
+#   ./dnsping.sh -s 9.9.9.9 -T example.com     # force TCP
+#   ./dnsping.sh -x 1.1.1.1                    # reverse lookup
+#
+
+set -u
+
+# ---- Defaults --------------------------------------------------------------
+COUNT=0
+INTERVAL=1
+TIMEOUT=2
+SERVER=""
+TYPE="A"
+USE_TCP=0
+REVERSE=0
+SHOW_ANSWER=0
+DOMAIN=""
+
+# ---- Colors (only if stdout is a TTY) --------------------------------------
+if [ -t 1 ]; then
+    RED=$'\033[0;31m'
+    GREEN=$'\033[0;32m'
+    YELLOW=$'\033[0;33m'
+    DIM=$'\033[2m'
+    RESET=$'\033[0m'
+else
+    RED=""; GREEN=""; YELLOW=""; DIM=""; RESET=""
+fi
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options] <domain|ip>
+
+Options:
+  -c COUNT     Stop after COUNT queries (default: until Ctrl+C)
+  -i INTERVAL  Seconds between queries, may be fractional (default: 1)
+  -W TIMEOUT   Per-query timeout in seconds (default: 2)
+  -s SERVER    Query this resolver (e.g. 1.1.1.1, 8.8.8.8, 9.9.9.9)
+  -t TYPE      Record type: A, AAAA, MX, TXT, NS, CNAME... (default: A)
+  -T           Use TCP instead of UDP
+  -x           Reverse lookup (PTR query, give an IP as the argument)
+  -d           Show the first answer record in each response
+  -n           Disable colour
+  -h           Show this help
+EOF
+    exit 1
+}
+
+# ---- Argument parsing ------------------------------------------------------
+while getopts "c:i:W:s:t:Txdnh" opt; do
+    case $opt in
+        c) COUNT=$OPTARG ;;
+        i) INTERVAL=$OPTARG ;;
+        W) TIMEOUT=$OPTARG ;;
+        s) SERVER=$OPTARG ;;
+        t) TYPE=$OPTARG ;;
+        T) USE_TCP=1 ;;
+        x) REVERSE=1; TYPE="PTR" ;;
+        d) SHOW_ANSWER=1 ;;
+        n) RED=""; GREEN=""; YELLOW=""; DIM=""; RESET="" ;;
+        h|*) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+DOMAIN="${1:-}"
+[ -z "$DOMAIN" ] && usage
+
+# ---- Build dig args --------------------------------------------------------
+DIG_ARGS=()
+[ -n "$SERVER" ] && DIG_ARGS+=("@$SERVER")
+if [ "$REVERSE" -eq 1 ]; then
+    DIG_ARGS+=("-x" "$DOMAIN")
+else
+    DIG_ARGS+=("$DOMAIN" "$TYPE")
+fi
+# +tries=1 prevents dig from retrying internally (default is 3)
+DIG_ARGS+=("+time=$TIMEOUT" "+tries=1")
+[ "$USE_TCP" -eq 1 ] && DIG_ARGS+=("+tcp")
+
+# ---- Statistics ------------------------------------------------------------
+sent=0
+received=0
+sum_ms=0
+min_ms=""
+max_ms=""
+
+print_stats() {
+    echo
+    echo "--- $DOMAIN dnsping statistics ---"
+    if [ "$sent" -gt 0 ]; then
+        loss=$(awk "BEGIN { printf \"%.1f\", (($sent - $received) / $sent) * 100 }")
+    else
+        loss="0.0"
+    fi
+    echo "$sent queries sent, $received responses, ${loss}% loss"
+    if [ "$received" -gt 0 ]; then
+        avg=$(awk "BEGIN { printf \"%.2f\", $sum_ms / $received }")
+        echo "rtt min/avg/max = ${min_ms}/${avg}/${max_ms} ms"
+    fi
+    exit 0
+}
+trap print_stats INT TERM
+
+# ---- Header ----------------------------------------------------------------
+SERVER_LABEL="(system resolver)"
+[ -n "$SERVER" ] && SERVER_LABEL="@$SERVER"
+PROTO="UDP"
+[ "$USE_TCP" -eq 1 ] && PROTO="TCP"
+QTYPE_LABEL="$TYPE"
+[ "$REVERSE" -eq 1 ] && QTYPE_LABEL="PTR (reverse)"
+
+echo "DNSPING $DOMAIN $QTYPE_LABEL $SERVER_LABEL ($PROTO, timeout ${TIMEOUT}s)"
+
+# ---- Main loop -------------------------------------------------------------
+seq=0
+while true; do
+    seq=$((seq + 1))
+    sent=$((sent + 1))
+
+    output=$(dig "${DIG_ARGS[@]}" 2>/dev/null)
+
+    # Parse the DNS rcode (NOERROR / NXDOMAIN / SERVFAIL / ...) from the header
+    status=$(echo "$output" | awk '
+        /->>HEADER<<-/ {
+            for (i = 1; i <= NF; i++)
+                if ($i == "status:") { gsub(",", "", $(i+1)); print $(i+1); exit }
+        }')
+
+    # Parse the query time reported by dig itself (integer ms)
+    time_ms=$(echo "$output" | awk '/Query time:/ { print $4; exit }')
+
+    if [ -z "$status" ] || [ -z "$time_ms" ]; then
+        # dig produced no parsable response — almost always a timeout or
+        # network failure (no server reachable, etc.)
+        printf "seq=%-4d ${RED}FAIL${RESET}  no response (timeout or unreachable)\n" "$seq"
+    else
+        # Colour by DNS rcode
+        case "$status" in
+            NOERROR)  c=$GREEN ;;
+            NXDOMAIN) c=$YELLOW ;;
+            SERVFAIL|REFUSED|FORMERR|NOTIMP) c=$RED ;;
+            *)        c=$RESET ;;
+        esac
+
+        if [ "$SHOW_ANSWER" -eq 1 ]; then
+            # First record from the ANSWER section
+            answer=$(echo "$output" | awk '
+                /^;; ANSWER SECTION:/ { flag=1; next }
+                /^$/                  { flag=0 }
+                flag                  { print; exit }')
+            if [ -n "$answer" ]; then
+                # Extract the rdata (last field of the record)
+                rdata=$(echo "$answer" | awk '{ print $NF }')
+                printf "seq=%-4d %s%s%s  time=%sms  ${DIM}answer=${RESET}%s\n" \
+                    "$seq" "$c" "$status" "$RESET" "$time_ms" "$rdata"
+            else
+                printf "seq=%-4d %s%s%s  time=%sms  ${DIM}(no answer)${RESET}\n" \
+                    "$seq" "$c" "$status" "$RESET" "$time_ms"
+            fi
+        else
+            printf "seq=%-4d %s%s%s  time=%sms\n" \
+                "$seq" "$c" "$status" "$RESET" "$time_ms"
+        fi
+
+        # NXDOMAIN still counts as a response (the server answered) — same
+        # convention dnsping itself uses
+        received=$((received + 1))
+        sum_ms=$(awk "BEGIN { print $sum_ms + $time_ms }")
+        if [ -z "$min_ms" ]; then
+            min_ms=$time_ms
+            max_ms=$time_ms
+        else
+            min_ms=$(awk "BEGIN { print ($time_ms < $min_ms) ? $time_ms : $min_ms }")
+            max_ms=$(awk "BEGIN { print ($time_ms > $max_ms) ? $time_ms : $max_ms }")
+        fi
+    fi
+
+    if [ "$COUNT" -gt 0 ] && [ "$seq" -ge "$COUNT" ]; then
+        print_stats
+    fi
+
+    sleep "$INTERVAL"
+done

@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+#
+# httping.sh - HTTP/HTTPS "ping" using curl
+#
+# Sends repeated HEAD (or GET) requests to a URL, reporting the HTTP
+# status code and round-trip time for each. Prints summary statistics
+# on exit (Ctrl+C or after -c COUNT requests).
+#
+# Examples:
+#   ./httping.sh https://example.com
+#   ./httping.sh -c 5 -i 0.5 https://example.com
+#   ./httping.sh -d https://example.com         # detailed timings
+#   ./httping.sh -G -c 10 https://api.example.com/health
+#
+
+set -u
+
+# ---- Defaults --------------------------------------------------------------
+COUNT=0          # 0 = run forever
+INTERVAL=1       # seconds between requests
+TIMEOUT=5        # per-request timeout (seconds)
+METHOD="HEAD"
+SHOW_DETAILS=0
+NO_COLOR=0
+
+# ---- Colors (only if stdout is a TTY) --------------------------------------
+if [ -t 1 ] && [ "${NO_COLOR}" -eq 0 ]; then
+    RED=$'\033[0;31m'
+    GREEN=$'\033[0;32m'
+    YELLOW=$'\033[0;33m'
+    DIM=$'\033[2m'
+    RESET=$'\033[0m'
+else
+    RED=""; GREEN=""; YELLOW=""; DIM=""; RESET=""
+fi
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options] <url>
+
+Options:
+  -c COUNT     Stop after COUNT requests (default: run until Ctrl+C)
+  -i INTERVAL  Seconds between requests, may be fractional (default: 1)
+  -t TIMEOUT   Per-request timeout in seconds (default: 5)
+  -G           Use GET instead of HEAD
+  -d           Detailed timings (DNS, connect, TLS, TTFB, total)
+  -n           Disable colour output
+  -h           Show this help
+
+The URL may omit the scheme (http:// is assumed).
+EOF
+    exit 1
+}
+
+# ---- Argument parsing ------------------------------------------------------
+while getopts "c:i:t:Gdnh" opt; do
+    case $opt in
+        c) COUNT=$OPTARG ;;
+        i) INTERVAL=$OPTARG ;;
+        t) TIMEOUT=$OPTARG ;;
+        G) METHOD="GET" ;;
+        d) SHOW_DETAILS=1 ;;
+        n) NO_COLOR=1; RED=""; GREEN=""; YELLOW=""; DIM=""; RESET="" ;;
+        h|*) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+URL="${1:-}"
+[ -z "$URL" ] && usage
+
+# Auto-prepend http:// if no scheme given
+if [[ ! "$URL" =~ ^https?:// ]]; then
+    URL="http://$URL"
+fi
+
+# ---- Statistics ------------------------------------------------------------
+sent=0
+received=0
+sum_ms=0
+min_ms=""
+max_ms=""
+
+print_stats() {
+    echo
+    echo "--- $URL httping statistics ---"
+    if [ "$sent" -gt 0 ]; then
+        loss=$(awk "BEGIN { printf \"%.1f\", (($sent - $received) / $sent) * 100 }")
+    else
+        loss="0.0"
+    fi
+    echo "$sent requests sent, $received responses, ${loss}% loss"
+    if [ "$received" -gt 0 ]; then
+        avg=$(awk "BEGIN { printf \"%.2f\", $sum_ms / $received }")
+        echo "rtt min/avg/max = ${min_ms}/${avg}/${max_ms} ms"
+    fi
+    exit 0
+}
+trap print_stats INT TERM
+
+# ---- curl format string ----------------------------------------------------
+if [ "$SHOW_DETAILS" -eq 1 ]; then
+    FORMAT='%{http_code} %{time_namelookup} %{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total}'
+else
+    FORMAT='%{http_code} %{time_total}'
+fi
+
+# Method-specific curl args
+if [ "$METHOD" = "HEAD" ]; then
+    METHOD_ARGS=(-I)        # use HEAD
+else
+    METHOD_ARGS=(-X GET)
+fi
+
+echo "HTTPING $URL ($METHOD, timeout ${TIMEOUT}s)"
+
+# ---- Main loop -------------------------------------------------------------
+seq=0
+while true; do
+    seq=$((seq + 1))
+    sent=$((sent + 1))
+
+    response=$(curl -s -o /dev/null "${METHOD_ARGS[@]}" \
+        --max-time "$TIMEOUT" \
+        -w "$FORMAT" \
+        "$URL" 2>/dev/null)
+    rc=$?
+
+    if [ "$SHOW_DETAILS" -eq 1 ]; then
+        read -r code t_dns t_conn t_tls t_ttfb t_total <<< "$response"
+    else
+        read -r code t_total <<< "$response"
+    fi
+
+    # curl returns 000 for connection failures (DNS, refused, timeout, etc.)
+    if [ "$rc" -ne 0 ] || [ -z "$code" ] || [ "$code" = "000" ]; then
+        case $rc in
+            6)  reason="dns failure" ;;
+            7)  reason="connection refused" ;;
+            28) reason="timeout (>${TIMEOUT}s)" ;;
+            35) reason="tls handshake failed" ;;
+            *)  reason="curl exit $rc" ;;
+        esac
+        printf "seq=%-4d ${RED}FAIL${RESET}  %s\n" "$seq" "$reason"
+    else
+        # Convert seconds to ms
+        total_ms=$(awk "BEGIN { printf \"%.2f\", $t_total * 1000 }")
+
+        # Colour by status class
+        case "${code:0:1}" in
+            2) c=$GREEN ;;
+            3) c=$YELLOW ;;
+            4|5) c=$RED ;;
+            *) c=$RESET ;;
+        esac
+
+        if [ "$SHOW_DETAILS" -eq 1 ]; then
+            dns_ms=$(awk  "BEGIN { printf \"%.1f\", $t_dns * 1000 }")
+            conn_ms=$(awk "BEGIN { printf \"%.1f\", ($t_conn - $t_dns) * 1000 }")
+            tls_ms=$(awk  "BEGIN { printf \"%.1f\", ($t_tls > 0) ? ($t_tls - $t_conn) * 1000 : 0 }")
+            ttfb_ms=$(awk "BEGIN { printf \"%.1f\", ($t_ttfb - (($t_tls > 0) ? $t_tls : $t_conn)) * 1000 }")
+            printf "seq=%-4d %s%s%s  ${DIM}dns${RESET}=%sms ${DIM}conn${RESET}=%sms ${DIM}tls${RESET}=%sms ${DIM}ttfb${RESET}=%sms ${DIM}total${RESET}=%sms\n" \
+                "$seq" "$c" "$code" "$RESET" "$dns_ms" "$conn_ms" "$tls_ms" "$ttfb_ms" "$total_ms"
+        else
+            printf "seq=%-4d %s%s%s  time=%sms\n" \
+                "$seq" "$c" "$code" "$RESET" "$total_ms"
+        fi
+
+        # Update stats
+        received=$((received + 1))
+        sum_ms=$(awk "BEGIN { print $sum_ms + $total_ms }")
+        if [ -z "$min_ms" ]; then
+            min_ms=$total_ms
+            max_ms=$total_ms
+        else
+            min_ms=$(awk "BEGIN { print ($total_ms < $min_ms) ? $total_ms : $min_ms }")
+            max_ms=$(awk "BEGIN { print ($total_ms > $max_ms) ? $total_ms : $max_ms }")
+        fi
+    fi
+
+    # Stop after COUNT requests
+    if [ "$COUNT" -gt 0 ] && [ "$seq" -ge "$COUNT" ]; then
+        print_stats
+    fi
+
+    sleep "$INTERVAL"
+done
