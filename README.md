@@ -56,11 +56,40 @@ HTTP/HTTPS "ping" using `curl`. Sends repeated HEAD (or GET) requests to a URL a
 
 **Requirements:** `curl`
 
+---
+
+### ntpping
+
+NTP query "ping" using `sntp`. Sends repeated SNTP queries to a time server and reports the clock offset and round-trip delay for each query, with summary statistics on exit.
+
+**Usage:**
+```bash
+./ntpping/ntpping pool.ntp.org
+./ntpping/ntpping -c 5 time.cloudflare.com
+./ntpping/ntpping -i 0.5 -W 2 time.google.com
+./ntpping/ntpping -4 0.uk.pool.ntp.org      # force IPv4
+```
+
+**Options:**
+| Flag | Description |
+|------|-------------|
+| `-c COUNT` | Stop after COUNT queries (default: run forever) |
+| `-i INTERVAL` | Seconds between queries (default: 1) |
+| `-W TIMEOUT` | Per-query timeout in seconds (default: 2) |
+| `-4` | Force IPv4 |
+| `-6` | Force IPv6 |
+| `-n` | Disable colour output |
+
+Offset is the local clock's difference from the server (positive = local clock is ahead). Delay is the round-trip network delay reported by `sntp`. Lines are colour-coded by absolute offset (green ≤ 10ms, yellow ≤ 100ms, red > 100ms).
+
+**Requirements:** `sntp` (from `ntp`, `ntpsec`, or `sntp` package; pre-installed on macOS)
+
 ## Requirements
 
 - Bash 4+
 - `dig` (for dnsping)
 - `curl` (for httping)
+- `sntp` (for ntpping)
 
 ## License
 
