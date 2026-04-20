@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+#
+# ntpping.sh - NTP query "ping" using sntp
+#
+# Sends repeated SNTP queries to an NTP server, reporting the clock offset
+# and round-trip delay reported by sntp for each query, with summary
+# statistics on exit (Ctrl+C or after -c COUNT queries).
+#
+# Examples:
+#   ./ntpping.sh pool.ntp.org
+#   ./ntpping.sh -c 5 time.cloudflare.com
+#   ./ntpping.sh -i 0.5 -W 2 time.google.com
+#   ./ntpping.sh -4 0.uk.pool.ntp.org           # force IPv4
+#
+
+set -u
+
+# ---- Defaults --------------------------------------------------------------
+COUNT=0          # 0 = run forever
+INTERVAL=1       # seconds between queries
+TIMEOUT=2        # per-query timeout (seconds)
+IP_VERSION=""    # "" = auto, "-4" or "-6" forces
+SERVER=""
+
+# ---- Colors (only if stdout is a TTY) --------------------------------------
+if [ -t 1 ]; then
+    RED=$'\033[0;31m'
+    GREEN=$'\033[0;32m'
+    YELLOW=$'\033[0;33m'
+    DIM=$'\033[2m'
+    RESET=$'\033[0m'
+else
+    RED=""; GREEN=""; YELLOW=""; DIM=""; RESET=""
+fi
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [options] <ntp-server>
+
+Options:
+  -c COUNT     Stop after COUNT queries (default: until Ctrl+C)
+  -i INTERVAL  Seconds between queries, may be fractional (default: 1)
+  -W TIMEOUT   Per-query timeout in seconds (default: 2)
+  -4           Force IPv4
+  -6           Force IPv6
+  -n           Disable colour output
+  -h           Show this help
+
+Reports the clock offset and round-trip delay (uncertainty) for each
+SNTP query. Offset is the local clock's difference from the server
+(positive = local is ahead). Delay is the round-trip network delay
+between client and server.
+EOF
+    exit 1
+}
+
+# ---- Argument parsing ------------------------------------------------------
+while getopts "c:i:W:46nh" opt; do
+    case $opt in
+        c) COUNT=$OPTARG ;;
+        i) INTERVAL=$OPTARG ;;
+        W) TIMEOUT=$OPTARG ;;
+        4) IP_VERSION="-4" ;;
+        6) IP_VERSION="-6" ;;
+        n) RED=""; GREEN=""; YELLOW=""; DIM=""; RESET="" ;;
+        h|*) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+SERVER="${1:-}"
+[ -z "$SERVER" ] && usage
+
+if ! command -v sntp >/dev/null 2>&1; then
+    echo "ntpping: 'sntp' not found in PATH (install ntp/ntpsec/sntp package)" >&2
+    exit 2
+fi
+
+# ---- Build sntp args -------------------------------------------------------
+SNTP_ARGS=("-t" "$TIMEOUT")
+[ -n "$IP_VERSION" ] && SNTP_ARGS+=("$IP_VERSION")
+
+# ---- Statistics ------------------------------------------------------------
+sent=0
+received=0
+sum_delay=0
+min_delay=""
+max_delay=""
+sum_abs_offset=0
+
+print_stats() {
+    echo
+    echo "--- $SERVER ntpping statistics ---"
+    if [ "$sent" -gt 0 ]; then
+        loss=$(awk "BEGIN { printf \"%.1f\", (($sent - $received) / $sent) * 100 }")
+    else
+        loss="0.0"
+    fi
+    echo "$sent queries sent, $received responses, ${loss}% loss"
+    if [ "$received" -gt 0 ]; then
+        avg_delay=$(awk "BEGIN { printf \"%.2f\", $sum_delay / $received }")
+        avg_off=$(awk "BEGIN { printf \"%.2f\", $sum_abs_offset / $received }")
+        echo "delay min/avg/max = ${min_delay}/${avg_delay}/${max_delay} ms"
+        echo "mean |offset| = ${avg_off} ms"
+    fi
+    exit 0
+}
+trap print_stats INT TERM
+
+# ---- Header ----------------------------------------------------------------
+echo "NTPPING $SERVER (sntp, timeout ${TIMEOUT}s)"
+
+# ---- Main loop -------------------------------------------------------------
+seq=0
+while true; do
+    seq=$((seq + 1))
+    sent=$((sent + 1))
+
+    # sntp prints a single line on success, e.g.:
+    #   +0.001234 +/- 0.012345 pool.ntp.org 1.2.3.4
+    # or with ntpsec:
+    #   2024-01-01 12:00:00.123 (+0000) +0.001234 +/- 0.012345 host ip s2 no-leap
+    output=$(sntp "${SNTP_ARGS[@]}" "$SERVER" 2>&1)
+    rc=$?
+
+    # Find the line containing "+/-" (the actual measurement line)
+    line=$(echo "$output" | awk '/\+\/-/ { print; exit }')
+
+    if [ "$rc" -ne 0 ] || [ -z "$line" ]; then
+        # Common failure modes: lookup error, no reply, kiss-of-death, etc.
+        # Prefer an "sntp:" diagnostic line over the noisy debug dump some
+        # implementations append on failure.
+        reason=$(echo "$output" | awk '/^sntp:/ { sub(/^sntp: */, ""); print; exit }')
+        [ -z "$reason" ] && reason=$(echo "$output" | awk 'NF && !/^[ \t}]/ { print; exit }')
+        [ -z "$reason" ] && reason="no response (timeout or unreachable)"
+        printf "seq=%-4d ${RED}FAIL${RESET}  %s\n" "$seq" "$reason"
+    else
+        # Locate the offset (the field immediately before "+/-") and the
+        # delay/uncertainty (the field immediately after). This works for
+        # both classic and ntpsec sntp output formats.
+        offset=$(echo "$line" | awk '{ for (i=1; i<=NF; i++) if ($i == "+/-") { print $(i-1); exit } }')
+        delay=$(echo  "$line" | awk '{ for (i=1; i<=NF; i++) if ($i == "+/-") { print $(i+1); exit } }')
+
+        if [ -z "$offset" ] || [ -z "$delay" ]; then
+            printf "seq=%-4d ${RED}FAIL${RESET}  unparsable response: %s\n" "$seq" "$line"
+        else
+            # Convert seconds to ms
+            offset_ms=$(awk "BEGIN { printf \"%.3f\", $offset * 1000 }")
+            delay_ms=$(awk  "BEGIN { printf \"%.3f\", $delay  * 1000 }")
+            abs_offset_ms=$(awk "BEGIN { v = $offset_ms; if (v < 0) v = -v; printf \"%.3f\", v }")
+
+            # Colour by absolute offset magnitude
+            big=$(awk "BEGIN { print ($abs_offset_ms > 100) ? 1 : 0 }")
+            mid=$(awk "BEGIN { print ($abs_offset_ms > 10)  ? 1 : 0 }")
+            if [ "$big" -eq 1 ]; then
+                c=$RED
+            elif [ "$mid" -eq 1 ]; then
+                c=$YELLOW
+            else
+                c=$GREEN
+            fi
+
+            # Trailing fields after the IP can carry stratum/leap info on
+            # ntpsec (e.g. "s2 no-leap"). Show them if present.
+            extra=$(echo "$line" | awk '{
+                for (i=1; i<=NF; i++) if ($i == "+/-") { start=i+3; break }
+                out=""
+                for (j=start+1; j<=NF; j++) out = out " " $j
+                sub(/^ /, "", out); print out
+            }')
+
+            if [ -n "$extra" ]; then
+                printf "seq=%-4d %sOK%s    offset=%+.3fms  delay=%sms  ${DIM}%s${RESET}\n" \
+                    "$seq" "$c" "$RESET" "$offset_ms" "$delay_ms" "$extra"
+            else
+                printf "seq=%-4d %sOK%s    offset=%+.3fms  delay=%sms\n" \
+                    "$seq" "$c" "$RESET" "$offset_ms" "$delay_ms"
+            fi
+
+            received=$((received + 1))
+            sum_delay=$(awk "BEGIN { print $sum_delay + $delay_ms }")
+            sum_abs_offset=$(awk "BEGIN { print $sum_abs_offset + $abs_offset_ms }")
+            if [ -z "$min_delay" ]; then
+                min_delay=$delay_ms
+                max_delay=$delay_ms
+            else
+                min_delay=$(awk "BEGIN { print ($delay_ms < $min_delay) ? $delay_ms : $min_delay }")
+                max_delay=$(awk "BEGIN { print ($delay_ms > $max_delay) ? $delay_ms : $max_delay }")
+            fi
+        fi
+    fi
+
+    if [ "$COUNT" -gt 0 ] && [ "$seq" -ge "$COUNT" ]; then
+        print_stats
+    fi
+
+    sleep "$INTERVAL"
+done
