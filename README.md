@@ -10,11 +10,11 @@ DNS query "ping" using `dig`. Sends repeated DNS queries to a resolver and repor
 
 **Usage:**
 ```bash
-./dnsping/dnsping example.com
-./dnsping/dnsping -s 1.1.1.1 -c 5 cloudflare.com
-./dnsping/dnsping -t MX -d google.com     # show first answer
-./dnsping/dnsping -s 9.9.9.9 -T example.com  # force TCP
-./dnsping/dnsping -x 1.1.1.1             # reverse lookup
+./dnsping example.com
+./dnsping -s 1.1.1.1 -c 5 cloudflare.com
+./dnsping -t MX -d google.com     # show first answer
+./dnsping -s 9.9.9.9 -T example.com  # force TCP
+./dnsping -x 1.1.1.1             # reverse lookup
 ```
 
 **Options:**
@@ -38,10 +38,10 @@ HTTP/HTTPS "ping" using `curl`. Sends repeated HEAD (or GET) requests to a URL a
 
 **Usage:**
 ```bash
-./httping/httping https://example.com
-./httping/httping -c 5 -i 0.5 https://example.com
-./httping/httping -d https://example.com        # detailed timings
-./httping/httping -G -c 10 https://api.example.com/health
+./httping https://example.com
+./httping -c 5 -i 0.5 https://example.com
+./httping -d https://example.com        # detailed timings
+./httping -G -c 10 https://api.example.com/health
 ```
 
 **Options:**
@@ -64,10 +64,10 @@ NTP query "ping" using `sntp`. Sends repeated SNTP queries to a time server and 
 
 **Usage:**
 ```bash
-./ntpping/ntpping pool.ntp.org
-./ntpping/ntpping -c 5 time.cloudflare.com
-./ntpping/ntpping -i 0.5 -W 2 time.google.com
-./ntpping/ntpping -4 0.uk.pool.ntp.org      # force IPv4
+./ntpping pool.ntp.org
+./ntpping -c 5 time.cloudflare.com
+./ntpping -i 0.5 -W 2 time.google.com
+./ntpping -4 0.uk.pool.ntp.org      # force IPv4
 ```
 
 **Options:**
@@ -90,6 +90,72 @@ Offset is the local clock's difference from the server (positive = local clock i
 - `dig` (for dnsping)
 - `curl` (for httping)
 - `sntp` (for ntpping)
+
+## Installation
+
+Clone the repo and copy the scripts onto your `PATH`. The examples below install to `/usr/local/bin` (which is on `PATH` by default on both macOS and most Linux distributions).
+
+### macOS
+
+```bash
+# Install dependencies (curl and sntp ship with macOS; dig comes from bind)
+brew install bind
+
+# Install the tools
+git clone https://github.com/simonpainter/network-tools.git
+cd network-tools
+sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
+```
+
+If you'd rather not use `sudo`, copy them to `~/bin` (and make sure that's on your `PATH`):
+
+```bash
+mkdir -p ~/bin
+install -m 0755 dnsping httping ntpping ~/bin/
+```
+
+### Linux
+
+Install dependencies with your distro's package manager, then install the scripts:
+
+**Debian / Ubuntu:**
+```bash
+sudo apt update
+sudo apt install -y bash dnsutils curl sntp
+git clone https://github.com/simonpainter/network-tools.git
+cd network-tools
+sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
+```
+
+**Fedora / RHEL / CentOS:**
+```bash
+sudo dnf install -y bash bind-utils curl sntp
+git clone https://github.com/simonpainter/network-tools.git
+cd network-tools
+sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S --needed bash bind curl ntp
+git clone https://github.com/simonpainter/network-tools.git
+cd network-tools
+sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
+```
+
+After installation, verify with:
+
+```bash
+dnsping -c 1 example.com
+httping -c 1 https://example.com
+ntpping -c 1 pool.ntp.org
+```
+
+### Uninstall
+
+```bash
+sudo rm /usr/local/bin/{dnsping,httping,ntpping}
+```
 
 ## License
 
