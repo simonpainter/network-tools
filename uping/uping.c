@@ -1,12 +1,17 @@
 /*
- * uping - microsecond-precision ICMP ping for macOS
+ * uping - microsecond-precision ICMP ping for macOS and Linux
  *
  * Uses SOCK_RAW/IPPROTO_ICMP for accurate timing (requires root/sudo),
- * falling back to SOCK_DGRAM if privileges are unavailable (macOS 10.14+).
+ * falling back to SOCK_DGRAM if privileges are unavailable (macOS 10.14+
+ * or Linux with a permissive ping_group_range).
  * SOCK_DGRAM adds kernel-layer overhead (~30 ms on macOS) that skews
  * results relative to system ping; SOCK_RAW avoids this.
  * Timing via clock_gettime(CLOCK_MONOTONIC) gives sub-microsecond
  * resolution; results are reported in whole microseconds.
+ *
+ * Linux note: the kernel must permit unprivileged ICMP sockets:
+ *   sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+ * or just run with sudo for SOCK_RAW access.
  *
  * Examples:
  *   ./uping 1.1.1.1
@@ -20,7 +25,6 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#include <netinet/ip6.h>
 #include <netinet/ip_icmp.h>
 #include <signal.h>
 #include <stdint.h>
@@ -205,13 +209,29 @@ int main(int argc, char *argv[])
         sock = socket(af, SOCK_DGRAM, proto);
         if (sock < 0) {
             perror("uping: socket");
+#ifdef __linux__
+            fprintf(stderr, "       Try running with sudo, or allow unprivileged pings:\n");
+            fprintf(stderr, "       sudo sysctl -w net.ipv4.ping_group_range=\"0 2147483647\"\n");
+#else
             fprintf(stderr, "       Try running with sudo for accurate raw ICMP timing.\n");
+#endif
             return 1;
         }
         fprintf(stderr, "uping: using unprivileged DGRAM socket (timing may be less accurate; run with sudo for best results)\n");
     } else {
         is_raw = 1;
     }
+
+    /*
+     * On macOS, received IPv4 packets always include the IP header (both
+     * SOCK_DGRAM and SOCK_RAW).  On Linux, SOCK_DGRAM strips the IP header;
+     * only SOCK_RAW delivers it.
+     */
+#ifdef __linux__
+    int recv_has_ip_hdr = is_raw;
+#else
+    int recv_has_ip_hdr = 1;
+#endif
 
     /* Receive timeout */
     struct timeval tv;
@@ -275,16 +295,21 @@ int main(int argc, char *argv[])
                 }
 
                 /*
-                 * On macOS both SOCK_RAW and SOCK_DGRAM include the IP
-                 * header in received ICMP packets. Always strip it.
-                 * In DGRAM mode the kernel also rewrites icmp_id, so
-                 * skip the ID check and rely on sequence + type only.
+                 * Strip the IP header to reach the ICMP message.
+                 * macOS always prepends it (DGRAM and RAW).
+                 * Linux only prepends it for SOCK_RAW.
                  */
-                if (n < (ssize_t)sizeof(struct ip)) continue;
-                struct ip *iph = (struct ip *)buf;
-                int ihl = iph->ip_hl * 4;
-                if (n < ihl + 8) continue;
-                struct icmp *icmp = (struct icmp *)(buf + ihl);
+                struct icmp *icmp;
+                if (recv_has_ip_hdr) {
+                    if (n < (ssize_t)sizeof(struct ip)) continue;
+                    struct ip *iph = (struct ip *)buf;
+                    int ihl = iph->ip_hl * 4;
+                    if (n < ihl + 8) continue;
+                    icmp = (struct icmp *)(buf + ihl);
+                } else {
+                    if (n < 8) continue;
+                    icmp = (struct icmp *)buf;
+                }
 
                 if (icmp->icmp_type != ICMP_ECHOREPLY)       continue;
                 if (is_raw && ntohs(icmp->icmp_id) != pid)   continue;

@@ -88,7 +88,7 @@ Offset is the local clock's difference from the server (positive = local clock i
 
 ### uping
 
-Microsecond-precision ICMP ping written in C. Uses `clock_gettime(CLOCK_MONOTONIC)` for sub-millisecond RTT measurement and reports results in whole microseconds. Works without root on macOS 10.14+ via `SOCK_DGRAM/IPPROTO_ICMP`, falling back to `SOCK_RAW` automatically.
+Microsecond-precision ICMP ping written in C. Uses `clock_gettime(CLOCK_MONOTONIC)` for sub-millisecond RTT measurement and reports results in whole microseconds. Works without root on macOS 10.14+ via `SOCK_DGRAM/IPPROTO_ICMP`, falling back to `SOCK_RAW` automatically. Also works on Linux.
 
 **Usage:**
 ```bash
@@ -109,7 +109,17 @@ Microsecond-precision ICMP ping written in C. Uses `clock_gettime(CLOCK_MONOTONI
 
 Lines are colour-coded by RTT: green < 1 ms, yellow < 10 ms, red ≥ 10 ms.
 
-**Requirements:** Xcode Command Line Tools (`xcode-select --install`)
+**Requirements:** `cc` / `gcc` / `clang` and standard C library
+
+**Linux note:** `sudo make install` automatically sets `CAP_NET_RAW` on the installed binary (via `setcap`), so `uping` works without `sudo` at runtime — exactly like the system `ping`. Requires `libcap2-bin` (Debian/Ubuntu) or `libcap` (Fedora/RHEL):
+```bash
+sudo apt install libcap2-bin   # Debian/Ubuntu
+sudo dnf install libcap        # Fedora/RHEL
+```
+If you skip `setcap` you can still run `sudo uping` directly, or allow unprivileged ICMP system-wide:
+```bash
+sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+```
 
 ---
 
@@ -119,7 +129,7 @@ Lines are colour-coded by RTT: green < 1 ms, yellow < 10 ms, red ≥ 10 ms.
 - `dig` (for dnsping)
 - `curl` (for httping)
 - `sntp` (for ntpping)
-- Xcode CLT / `cc` (for uping)
+- `cc` / `gcc` / `clang` (for uping)
 
 ## Installation
 
