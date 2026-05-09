@@ -121,6 +121,13 @@ If you skip `setcap` you can still run `sudo uping` directly, or allow unprivile
 sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
 ```
 
+**macOS note:** `SOCK_RAW` requires root for accurate timing. Without it, uping falls back to `SOCK_DGRAM` which adds ~30 ms of kernel overhead to every reading. To run without `sudo`, use setuid-root (the same mechanism as the system `ping`):
+```bash
+sudo chown root:wheel /usr/local/bin/uping
+sudo chmod u+s /usr/local/bin/uping
+```
+After that, `uping` can be run by any user with accurate raw socket timing.
+
 ---
 
 ## Requirements
