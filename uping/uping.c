@@ -115,12 +115,12 @@ static void usage(const char *prog)
 #pragma pack(push, 1)
 struct icmp4_pkt {
     struct icmp hdr;
-    long long   ts_us;   /* send timestamp — used to match reply */
+    long long   ts_us;   /* send timestamp carried in payload for RTT measurement */
 };
 
 struct icmp6_pkt {
     struct icmp6_hdr hdr;
-    long long        ts_us;
+    long long        ts_us;   /* send timestamp carried in payload for RTT measurement */
 };
 #pragma pack(pop)
 
