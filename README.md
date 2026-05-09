@@ -88,45 +88,7 @@ Offset is the local clock's difference from the server (positive = local clock i
 
 ### uping
 
-Microsecond-precision ICMP ping written in C. Uses `clock_gettime(CLOCK_MONOTONIC)` for sub-millisecond RTT measurement and reports results in whole microseconds. Works without root on macOS 10.14+ via `SOCK_DGRAM/IPPROTO_ICMP`, falling back to `SOCK_RAW` automatically. Also works on Linux.
-
-**Usage:**
-```bash
-./uping 1.1.1.1
-./uping -c 10 -i 0.5 google.com
-./uping -W 1 -6 2606:4700:4700::1111
-```
-
-**Options:**
-| Flag | Description |
-|------|-------------|
-| `-c COUNT` | Stop after COUNT pings (default: run forever) |
-| `-i INTERVAL` | Seconds between pings, may be fractional (default: 1) |
-| `-W TIMEOUT` | Per-ping timeout in seconds (default: 2) |
-| `-4` | Force IPv4 |
-| `-6` | Force IPv6 |
-| `-n` | Disable colour output |
-
-Lines are colour-coded by RTT: green < 1 ms, yellow < 10 ms, red ≥ 10 ms.
-
-**Requirements:** `cc` / `gcc` / `clang` and standard C library
-
-**Linux note:** `sudo make install` automatically sets `CAP_NET_RAW` on the installed binary (via `setcap`), so `uping` works without `sudo` at runtime — exactly like the system `ping`. Requires `libcap2-bin` (Debian/Ubuntu) or `libcap` (Fedora/RHEL):
-```bash
-sudo apt install libcap2-bin   # Debian/Ubuntu
-sudo dnf install libcap        # Fedora/RHEL
-```
-If you skip `setcap` you can still run `sudo uping` directly, or allow unprivileged ICMP system-wide:
-```bash
-sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
-```
-
-**macOS note:** `SOCK_RAW` requires root for accurate timing. Without it, uping falls back to `SOCK_DGRAM` which adds ~30 ms of kernel overhead to every reading. To run without `sudo`, use setuid-root (the same mechanism as the system `ping`):
-```bash
-sudo chown root:wheel /usr/local/bin/uping
-sudo chmod u+s /usr/local/bin/uping
-```
-After that, `uping` can be run by any user with accurate raw socket timing.
+> **uping has moved** — it now lives in its own repository: [simonpainter/uping](https://github.com/simonpainter/uping)
 
 ---
 
@@ -136,7 +98,6 @@ After that, `uping` can be run by any user with accurate raw socket timing.
 - `dig` (for dnsping)
 - `curl` (for httping)
 - `sntp` (for ntpping)
-- `cc` / `gcc` / `clang` (for uping)
 
 ## Installation
 
@@ -150,11 +111,6 @@ brew install bind
 git clone https://github.com/simonpainter/network-tools.git
 cd network-tools
 sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
-
-# Build and install uping
-cd uping
-make
-sudo make install
 ```
 
 If you'd rather not use `sudo`, copy them to `~/bin` (and make sure that's on your `PATH`):
@@ -162,7 +118,6 @@ If you'd rather not use `sudo`, copy them to `~/bin` (and make sure that's on yo
 ```bash
 mkdir -p ~/bin
 install -m 0755 dnsping httping ntpping ~/bin/
-install -m 0755 uping/uping ~/bin/
 ```
 
 After installation, verify with:
@@ -171,13 +126,12 @@ After installation, verify with:
 dnsping -c 1 example.com
 httping -c 1 https://example.com
 ntpping -c 1 pool.ntp.org
-uping -c 3 1.1.1.1
 ```
 
 ### Uninstall
 
 ```bash
-sudo rm /usr/local/bin/{dnsping,httping,ntpping,uping}
+sudo rm /usr/local/bin/{dnsping,httping,ntpping}
 ```
 
 ## License
