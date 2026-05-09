@@ -369,11 +369,18 @@ int main(int argc, char *argv[])
                 if (g_min_us < 0 || rtt < g_min_us) g_min_us = rtt;
                 if (rtt > g_max_us) g_max_us = rtt;
 
+                char from_str[NI_MAXHOST];
+                if (getnameinfo((struct sockaddr *)&from, fromlen,
+                                from_str, sizeof(from_str),
+                                NULL, 0, NI_NUMERICHOST) != 0) {
+                    snprintf(from_str, sizeof(from_str), "%s", dst_str);
+                }
+
                 const char *col = rtt < 1000   ? COL_GREEN
                                 : rtt < 10000  ? COL_YELLOW
                                                : COL_RED;
                 printf("seq=%-4d %s%lldµs%s  from %s\n",
-                       seq, col, rtt, COL_RESET, dst_str);
+                       seq, col, rtt, COL_RESET, from_str);
                 break;
             }
         }
