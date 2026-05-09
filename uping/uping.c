@@ -295,8 +295,21 @@ int main(int argc, char *argv[])
                 const char *col = rtt < 1000   ? COL_GREEN
                                 : rtt < 10000  ? COL_YELLOW
                                                : COL_RED;
+                char from_str[INET6_ADDRSTRLEN];
+                const char *reply_from = dst_str;
+                if (from.ss_family == AF_INET) {
+                    struct sockaddr_in *from4 = (struct sockaddr_in *)&from;
+                    if (inet_ntop(AF_INET, &from4->sin_addr,
+                                  from_str, sizeof(from_str)) != NULL)
+                        reply_from = from_str;
+                } else if (from.ss_family == AF_INET6) {
+                    struct sockaddr_in6 *from6 = (struct sockaddr_in6 *)&from;
+                    if (inet_ntop(AF_INET6, &from6->sin6_addr,
+                                  from_str, sizeof(from_str)) != NULL)
+                        reply_from = from_str;
+                }
                 printf("seq=%-4d %s%lldµs%s  from %s\n",
-                       seq, col, rtt, COL_RESET, dst_str);
+                       seq, col, rtt, COL_RESET, reply_from);
                 break;
             }
 
