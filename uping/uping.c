@@ -1,8 +1,10 @@
 /*
  * uping - microsecond-precision ICMP ping for macOS
  *
- * Uses SOCK_DGRAM/IPPROTO_ICMP (no root required on macOS 10.14+),
- * falling back to SOCK_RAW if unavailable.
+ * Uses SOCK_RAW/IPPROTO_ICMP for accurate timing (requires root/sudo),
+ * falling back to SOCK_DGRAM if privileges are unavailable (macOS 10.14+).
+ * SOCK_DGRAM adds kernel-layer overhead (~30 ms on macOS) that skews
+ * results relative to system ping; SOCK_RAW avoids this.
  * Timing via clock_gettime(CLOCK_MONOTONIC) gives sub-microsecond
  * resolution; results are reported in whole microseconds.
  *
@@ -195,17 +197,19 @@ int main(int argc, char *argv[])
                   dst_str, sizeof(dst_str));
     }
 
-    /* Open socket — try unprivileged DGRAM first */
+    /* Open socket — try RAW first for accurate timing, fall back to DGRAM */
     int is_raw = 0;
     int proto  = (af == AF_INET6) ? IPPROTO_ICMPV6 : IPPROTO_ICMP;
-    int sock   = socket(af, SOCK_DGRAM, proto);
+    int sock   = socket(af, SOCK_RAW, proto);
     if (sock < 0) {
-        sock = socket(af, SOCK_RAW, proto);
+        sock = socket(af, SOCK_DGRAM, proto);
         if (sock < 0) {
             perror("uping: socket");
-            fprintf(stderr, "       Try running with sudo for raw ICMP access.\n");
+            fprintf(stderr, "       Try running with sudo for accurate raw ICMP timing.\n");
             return 1;
         }
+        fprintf(stderr, "uping: using unprivileged DGRAM socket (timing may be less accurate; run with sudo for best results)\n");
+    } else {
         is_raw = 1;
     }
 
