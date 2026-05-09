@@ -161,6 +161,7 @@ int main(int argc, char *argv[])
 
     const char *host = argv[optind];
     strncpy(g_target, host, sizeof(g_target) - 1);
+    g_target[sizeof(g_target) - 1] = '\0';
 
     /* Resolve the target */
     struct addrinfo hints, *res;
