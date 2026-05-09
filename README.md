@@ -84,27 +84,60 @@ Offset is the local clock's difference from the server (positive = local clock i
 
 **Requirements:** `sntp` (from `ntp`, `ntpsec`, or `sntp` package; pre-installed on macOS)
 
+---
+
+### uping
+
+Microsecond-precision ICMP ping written in C. Uses `clock_gettime(CLOCK_MONOTONIC)` for sub-millisecond RTT measurement and reports results in whole microseconds. Works without root on macOS 10.14+ via `SOCK_DGRAM/IPPROTO_ICMP`, falling back to `SOCK_RAW` automatically.
+
+**Usage:**
+```bash
+./uping 1.1.1.1
+./uping -c 10 -i 0.5 google.com
+./uping -W 1 -6 2606:4700:4700::1111
+```
+
+**Options:**
+| Flag | Description |
+|------|-------------|
+| `-c COUNT` | Stop after COUNT pings (default: run forever) |
+| `-i INTERVAL` | Seconds between pings, may be fractional (default: 1) |
+| `-W TIMEOUT` | Per-ping timeout in seconds (default: 2) |
+| `-4` | Force IPv4 |
+| `-6` | Force IPv6 |
+| `-n` | Disable colour output |
+
+Lines are colour-coded by RTT: green < 1 ms, yellow < 10 ms, red ≥ 10 ms.
+
+**Requirements:** Xcode Command Line Tools (`xcode-select --install`)
+
+---
+
 ## Requirements
 
 - Bash 4+
 - `dig` (for dnsping)
 - `curl` (for httping)
 - `sntp` (for ntpping)
+- Xcode CLT / `cc` (for uping)
 
 ## Installation
 
-Clone the repo and copy the scripts onto your `PATH`. The examples below install to `/usr/local/bin` (which is on `PATH` by default on both macOS and most Linux distributions).
-
-### macOS
+Clone the repo and install the tools to your `PATH`.
 
 ```bash
 # Install dependencies (curl and sntp ship with macOS; dig comes from bind)
 brew install bind
 
-# Install the tools
+# Install the bash tools
 git clone https://github.com/simonpainter/network-tools.git
 cd network-tools
 sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
+
+# Build and install uping
+cd uping
+make
+sudo make install
 ```
 
 If you'd rather not use `sudo`, copy them to `~/bin` (and make sure that's on your `PATH`):
@@ -112,35 +145,7 @@ If you'd rather not use `sudo`, copy them to `~/bin` (and make sure that's on yo
 ```bash
 mkdir -p ~/bin
 install -m 0755 dnsping httping ntpping ~/bin/
-```
-
-### Linux
-
-Install dependencies with your distro's package manager, then install the scripts:
-
-**Debian / Ubuntu:**
-```bash
-sudo apt update
-sudo apt install -y bash dnsutils curl sntp
-git clone https://github.com/simonpainter/network-tools.git
-cd network-tools
-sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
-```
-
-**Fedora / RHEL / CentOS:**
-```bash
-sudo dnf install -y bash bind-utils curl sntp
-git clone https://github.com/simonpainter/network-tools.git
-cd network-tools
-sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
-```
-
-**Arch Linux:**
-```bash
-sudo pacman -S --needed bash bind curl ntp
-git clone https://github.com/simonpainter/network-tools.git
-cd network-tools
-sudo install -m 0755 dnsping httping ntpping /usr/local/bin/
+install -m 0755 uping/uping ~/bin/
 ```
 
 After installation, verify with:
@@ -149,12 +154,13 @@ After installation, verify with:
 dnsping -c 1 example.com
 httping -c 1 https://example.com
 ntpping -c 1 pool.ntp.org
+uping -c 3 1.1.1.1
 ```
 
 ### Uninstall
 
 ```bash
-sudo rm /usr/local/bin/{dnsping,httping,ntpping}
+sudo rm /usr/local/bin/{dnsping,httping,ntpping,uping}
 ```
 
 ## License
