@@ -1,6 +1,10 @@
 /*
  * uping - microsecond-precision ICMP ping for macOS and Linux
  *
+ * _GNU_SOURCE must be defined before any system headers on Linux to expose
+ * POSIX/BSD extensions: clock_gettime, struct icmp, getaddrinfo, nanosleep,
+ * suseconds_t, NI_MAXHOST, etc.  It is harmless on macOS.
+ *
  * Uses SOCK_RAW/IPPROTO_ICMP for accurate timing (requires root/sudo),
  * falling back to SOCK_DGRAM if privileges are unavailable (macOS 10.14+
  * or Linux with a permissive ping_group_range).
@@ -18,6 +22,7 @@
  *   ./uping -c 10 -i 0.5 google.com
  *   ./uping -W 1 -6 ipv6.google.com
  */
+#define _GNU_SOURCE
 
 #include <arpa/inet.h>
 #include <errno.h>
