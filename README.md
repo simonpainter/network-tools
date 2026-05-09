@@ -111,11 +111,15 @@ Lines are colour-coded by RTT: green < 1 ms, yellow < 10 ms, red ≥ 10 ms.
 
 **Requirements:** `cc` / `gcc` / `clang` and standard C library
 
-**Linux note:** Unprivileged ICMP sockets require a permissive `ping_group_range`:
+**Linux note:** `sudo make install` automatically sets `CAP_NET_RAW` on the installed binary (via `setcap`), so `uping` works without `sudo` at runtime — exactly like the system `ping`. Requires `libcap2-bin` (Debian/Ubuntu) or `libcap` (Fedora/RHEL):
+```bash
+sudo apt install libcap2-bin   # Debian/Ubuntu
+sudo dnf install libcap        # Fedora/RHEL
+```
+If you skip `setcap` you can still run `sudo uping` directly, or allow unprivileged ICMP system-wide:
 ```bash
 sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
 ```
-Alternatively, run with `sudo` to use a raw socket.
 
 ---
 
