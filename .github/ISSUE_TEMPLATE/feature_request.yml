@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an improvement for one of the network tools
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: Share the problem you are trying to solve and the change you want to see.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What is the current limitation?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should the tool do instead?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
